@@ -66,7 +66,8 @@ jobs:
           PREFIX="v${VERSION}"
           AWS="aws --endpoint-url $S3_ENDPOINT"
 
-          EXE=$(find src-tauri/target -path '*/bundle/nsis/*.exe' ! -name '*.exe.sig' | head -1)
+          EXE=$(python3 .github/scripts/find_bundle.py "bundle/nsis/*.exe")
+          [ -n "$EXE" ] || { echo "::error::NSIS .exe не найден в src-tauri/target"; exit 1; }
           SIG="$EXE.sig"
 
           $AWS s3 cp "$EXE" "s3://$BUCKET/$PREFIX/$(basename "$EXE")" --content-type application/octet-stream
@@ -88,8 +89,10 @@ jobs:
           PREFIX="v${VERSION}"
           AWS="aws --endpoint-url $S3_ENDPOINT"
 
-          DMG=$(find src-tauri/target -path '*/bundle/dmg/*.dmg' | head -1)
-          APPTAR=$(find src-tauri/target -path '*/bundle/macos/*.app.tar.gz' ! -name '*.sig' | head -1)
+          DMG=$(python3 .github/scripts/find_bundle.py "bundle/dmg/*.dmg")
+          APPTAR=$(python3 .github/scripts/find_bundle.py "bundle/macos/*.app.tar.gz")
+          [ -n "$DMG" ] || { echo "::error::.dmg не найден в src-tauri/target"; exit 1; }
+          [ -n "$APPTAR" ] || { echo "::error::.app.tar.gz (updater-артефакт) не найден в src-tauri/target"; exit 1; }
           SIG="$APPTAR.sig"
 
           $AWS s3 cp "$DMG" "s3://$BUCKET/$PREFIX/$(basename "$DMG")" --content-type application/octet-stream
