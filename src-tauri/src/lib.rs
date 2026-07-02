@@ -33,6 +33,12 @@ pub fn run() {
 
   builder
     .plugin(tauri_plugin_store::Builder::default().build())
+    // Ссылки target="_blank" внутри страницы (например, наши же кнопки
+    // "скачать" в анонсе приложения) Tauri по умолчанию открывает в новом
+    // "сыром" окне Tauri, а не в системном браузере — его закрытие могло
+    // валить всё приложение. JS-шим в sites/index.html перехватывает такие
+    // клики и зовёт этот плагин, чтобы ссылка открылась в обычном браузере.
+    .plugin(tauri_plugin_opener::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

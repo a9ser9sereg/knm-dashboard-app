@@ -1,12 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "remote-dashboard",
-  "description": "Доступ страницы дашборда (удалённый HTTPS URL) к store-плагину — кэш последних данных и refresh-токен долгой сессии. Updater/process/tray остаются на стороне Rust, странице не выдаются.",
+  "description": "Доступ страницы дашборда (удалённый HTTPS URL) к store-плагину (кэш последних данных и refresh-токен долгой сессии) и opener (внешние ссылки — в системный браузер, не в новое окно Tauri). Updater/process/tray остаются на стороне Rust, странице не выдаются.",
   "remote": {
     "urls": ["https://d5do79fn06e3ml9pipcc.kr8f6hld.apigw.yandexcloud.net/*"]
   },
   "windows": ["main"],
   "permissions": [
-    "store:default"
+    "store:default",
+    "opener:default",
+    "opener:allow-open-url"
   ]
 }
