@@ -1,3 +1,4 @@
+#[cfg(desktop)]
 use tauri::{
   menu::{Menu, MenuItem},
   tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -6,7 +7,12 @@ use tauri::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let builder = tauri::Builder::default();
+
+  // Трей/single-instance/закрытие-в-трей — desktop-only понятия, на мобиле
+  // их нет (там модель "свернуть в фон", а не "закрыть окно").
+  #[cfg(desktop)]
+  let builder = builder
     // Должен регистрироваться первым: повторный запуск (двойной клик по
     // ярлыку, когда приложение уже свёрнуто в трей) просто поднимает окно.
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -15,8 +21,18 @@ pub fn run() {
         let _ = w.set_focus();
       }
     }))
-    .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_process::init())
+    // Закрытие окна сворачивает в трей вместо завершения процесса —
+    // выйти можно только через пункт «Выход» в меню трея.
+    .on_window_event(|window, event| {
+      if let WindowEvent::CloseRequested { api, .. } = event {
+        let _ = window.hide();
+        api.prevent_close();
+      }
+    });
+
+  builder
+    .plugin(tauri_plugin_store::Builder::default().build())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -27,51 +43,45 @@ pub fn run() {
       }
 
       #[cfg(desktop)]
-      app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+      {
+        app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
 
-      let show_i = MenuItem::with_id(app, "show", "Показать", true, None::<&str>)?;
-      let quit_i = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-      let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+        let show_i = MenuItem::with_id(app, "show", "Показать", true, None::<&str>)?;
+        let quit_i = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
+        let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-      TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-          "show" => {
-            if let Some(w) = app.get_webview_window("main") {
-              let _ = w.show();
-              let _ = w.set_focus();
+        TrayIconBuilder::new()
+          .icon(app.default_window_icon().unwrap().clone())
+          .menu(&menu)
+          .show_menu_on_left_click(false)
+          .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+              if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+              }
             }
-          }
-          "quit" => app.exit(0),
-          _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-          if let TrayIconEvent::Click {
-            button: MouseButton::Left,
-            button_state: MouseButtonState::Up,
-            ..
-          } = event
-          {
-            let app = tray.app_handle();
-            if let Some(w) = app.get_webview_window("main") {
-              let _ = w.show();
-              let _ = w.set_focus();
+            "quit" => app.exit(0),
+            _ => {}
+          })
+          .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+              button: MouseButton::Left,
+              button_state: MouseButtonState::Up,
+              ..
+            } = event
+            {
+              let app = tray.app_handle();
+              if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+              }
             }
-          }
-        })
-        .build(app)?;
+          })
+          .build(app)?;
+      }
 
       Ok(())
-    })
-    // Закрытие окна сворачивает в трей вместо завершения процесса —
-    // выйти можно только через пункт «Выход» в меню трея.
-    .on_window_event(|window, event| {
-      if let WindowEvent::CloseRequested { api, .. } = event {
-        let _ = window.hide();
-        api.prevent_close();
-      }
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
