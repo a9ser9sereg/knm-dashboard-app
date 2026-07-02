@@ -1,0 +1,5 @@
+node_modules/
+secrets/
+src-tauri/target/
+src-tauri/gen/schemas
+*.log

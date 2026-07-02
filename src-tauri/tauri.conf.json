@@ -1,0 +1,47 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Дашборд ГСН МО",
+  "version": "0.1.0",
+  "identifier": "ru.mosreg.gsn.dashboard",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "https://d5do79fn06e3ml9pipcc.kr8f6hld.apigw.yandexcloud.net"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Дашборд ГСН МО",
+        "url": "https://d5do79fn06e3ml9pipcc.kr8f6hld.apigw.yandexcloud.net",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM1MUZGQzI0Qzk5RDIzRDEKUldUUkk1M0pKUHdmTlpVZGFaeU4xcDV1M3J5Wk1pZHgyZTVlM3FKRG1ESnpJSVp6MzF1bExQeUkK",
+      "endpoints": [
+        "https://storage.yandexcloud.net/knm-dashboard-app/latest.json"
+      ]
+    }
+  }
+}

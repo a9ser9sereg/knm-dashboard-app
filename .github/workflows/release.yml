@@ -1,0 +1,149 @@
+name: Release
+
+# Публикуем НЕ в GitHub Releases (тот же урок, что и с GitHub Pages для самого
+# дашборда — часть пользователей в РФ не открывает github.io/githubusercontent
+# без VPN). GitHub Actions используем только как бесплатный компьютер для
+# сборки; установщики и манифест автообновления заливаем в Yandex Object
+# Storage (бакет knm-dashboard-app, публичный на чтение).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.YC_RELEASER_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.YC_RELEASER_SECRET }}
+  AWS_DEFAULT_REGION: ru-central1
+  S3_ENDPOINT: https://storage.yandexcloud.net
+  BUCKET: knm-dashboard-app
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            fragment: windows
+            rust-targets: ''
+            build-args: ''
+          - platform: macos-latest
+            fragment: macos
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            build-args: '--target universal-apple-darwin'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - name: Зависимости
+        run: npm ci
+
+      - name: Сборка (подписанные артефакты автообновления)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # tagName/releaseName/releaseId намеренно НЕ заданы — экшен только
+        # собирает, без создания GitHub Release.
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: ${{ matrix.build-args }}
+
+      - name: Публикация в Yandex Object Storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREFIX="v${VERSION}"
+          AWS="aws --endpoint-url $S3_ENDPOINT"
+
+          upload() { # upload <local> <content-type>
+            local key="$PREFIX/$(basename "$1")"
+            echo "→ $key"
+            $AWS s3 cp "$1" "s3://$BUCKET/$key" --content-type "$2"
+          }
+
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            EXE=$(find src-tauri/target -path '*/bundle/nsis/*.exe' ! -name '*.exe.sig' | head -1)
+            SIG="$EXE.sig"
+            upload "$EXE" "application/octet-stream"
+            upload "$SIG" "text/plain"
+            EXE_URL="https://storage.yandexcloud.net/$BUCKET/$PREFIX/$(basename "$EXE")"
+            SIGNATURE=$(cat "$SIG")
+            python3 - "$EXE_URL" "$SIGNATURE" <<'PYEOF'
+import json, sys
+url, sig = sys.argv[1], sys.argv[2]
+frag = {"windows-x86_64": {"signature": sig, "url": url}}
+with open("fragment.json", "w", encoding="utf-8") as f:
+    json.dump(frag, f)
+PYEOF
+          else
+            DMG=$(find src-tauri/target -path '*/bundle/dmg/*.dmg' | head -1)
+            APPTAR=$(find src-tauri/target -path '*/bundle/macos/*.app.tar.gz' ! -name '*.sig' | head -1)
+            SIG="$APPTAR.sig"
+            upload "$DMG" "application/octet-stream"
+            upload "$APPTAR" "application/gzip"
+            upload "$SIG" "text/plain"
+            APPTAR_URL="https://storage.yandexcloud.net/$BUCKET/$PREFIX/$(basename "$APPTAR")"
+            SIGNATURE=$(cat "$SIG")
+            python3 - "$APPTAR_URL" "$SIGNATURE" <<'PYEOF'
+import json, sys
+url, sig = sys.argv[1], sys.argv[2]
+frag = {
+    "darwin-x86_64": {"signature": sig, "url": url},
+    "darwin-aarch64": {"signature": sig, "url": url},
+}
+with open("fragment.json", "w", encoding="utf-8") as f:
+    json.dump(frag, f)
+PYEOF
+          fi
+
+          aws --endpoint-url $S3_ENDPOINT s3 cp fragment.json \
+            "s3://$BUCKET/_fragments/${{ matrix.fragment }}.json" \
+            --content-type application/json
+
+  publish-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Собрать latest.json из фрагментов и опубликовать
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          AWS="aws --endpoint-url $S3_ENDPOINT"
+
+          $AWS s3 cp "s3://$BUCKET/_fragments/windows.json" windows.json
+          $AWS s3 cp "s3://$BUCKET/_fragments/macos.json" macos.json
+
+          python3 - "$VERSION" <<'PYEOF'
+import json, sys, datetime
+version = sys.argv[1]
+platforms = {}
+for name in ("windows.json", "macos.json"):
+    with open(name, encoding="utf-8") as f:
+        platforms.update(json.load(f))
+manifest = {
+    "version": version,
+    "notes": f"Дашборд ГСН МО {version}",
+    "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "platforms": platforms,
+}
+with open("latest.json", "w", encoding="utf-8") as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=2)
+PYEOF
+
+          $AWS s3 cp latest.json "s3://$BUCKET/latest.json" \
+            --content-type application/json --cache-control no-cache
+          $AWS s3 rm "s3://$BUCKET/_fragments/windows.json"
+          $AWS s3 rm "s3://$BUCKET/_fragments/macos.json"
