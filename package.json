@@ -4,6 +4,7 @@
   "description": "Десктоп-обёртка (Tauri) дашборда ГСН МО — окно поверх удалённого URL, трей, офлайн-кэш, автообновление",
   "private": true,
   "scripts": {
+    "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
     "signer": "tauri signer generate"
