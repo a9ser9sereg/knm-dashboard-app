@@ -4,6 +4,11 @@ src-tauri/target, glob.glob работает надёжно на всех пла
 Печатает первый найденный путь или ничего (пусто), если нет совпадений."""
 import argparse
 import glob
+import sys
+
+# На Windows-раннере stdout по умолчанию в cp1252 — кириллица в имени файла
+# (productName) валит print() UnicodeEncodeError. Форсируем UTF-8.
+sys.stdout.reconfigure(encoding="utf-8")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("suffix", help="например */bundle/dmg/*.dmg")
