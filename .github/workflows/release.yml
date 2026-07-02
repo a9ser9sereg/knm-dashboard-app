@@ -53,13 +53,12 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        # tagName/releaseName/releaseId намеренно НЕ заданы — экшен только
-        # собирает, без создания GitHub Release.
         uses: tauri-apps/tauri-action@v0
         with:
           args: ${{ matrix.build-args }}
 
-      - name: Публикация в Yandex Object Storage
+      - name: Публикация установщика в Yandex Object Storage (Windows)
+        if: matrix.platform == 'windows-latest'
         shell: bash
         run: |
           set -euo pipefail
@@ -67,55 +66,52 @@ jobs:
           PREFIX="v${VERSION}"
           AWS="aws --endpoint-url $S3_ENDPOINT"
 
-          upload() { # upload <local> <content-type>
-            local key="$PREFIX/$(basename "$1")"
-            echo "→ $key"
-            $AWS s3 cp "$1" "s3://$BUCKET/$key" --content-type "$2"
-          }
+          EXE=$(find src-tauri/target -path '*/bundle/nsis/*.exe' ! -name '*.exe.sig' | head -1)
+          SIG="$EXE.sig"
 
-          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
-            EXE=$(find src-tauri/target -path '*/bundle/nsis/*.exe' ! -name '*.exe.sig' | head -1)
-            SIG="$EXE.sig"
-            upload "$EXE" "application/octet-stream"
-            upload "$SIG" "text/plain"
-            EXE_URL="https://storage.yandexcloud.net/$BUCKET/$PREFIX/$(basename "$EXE")"
-            SIGNATURE=$(cat "$SIG")
-            python3 - "$EXE_URL" "$SIGNATURE" <<'PYEOF'
-import json, sys
-url, sig = sys.argv[1], sys.argv[2]
-frag = {"windows-x86_64": {"signature": sig, "url": url}}
-with open("fragment.json", "w", encoding="utf-8") as f:
-    json.dump(frag, f)
-PYEOF
-          else
-            DMG=$(find src-tauri/target -path '*/bundle/dmg/*.dmg' | head -1)
-            APPTAR=$(find src-tauri/target -path '*/bundle/macos/*.app.tar.gz' ! -name '*.sig' | head -1)
-            SIG="$APPTAR.sig"
-            upload "$DMG" "application/octet-stream"
-            upload "$APPTAR" "application/gzip"
-            upload "$SIG" "text/plain"
-            APPTAR_URL="https://storage.yandexcloud.net/$BUCKET/$PREFIX/$(basename "$APPTAR")"
-            SIGNATURE=$(cat "$SIG")
-            python3 - "$APPTAR_URL" "$SIGNATURE" <<'PYEOF'
-import json, sys
-url, sig = sys.argv[1], sys.argv[2]
-frag = {
-    "darwin-x86_64": {"signature": sig, "url": url},
-    "darwin-aarch64": {"signature": sig, "url": url},
-}
-with open("fragment.json", "w", encoding="utf-8") as f:
-    json.dump(frag, f)
-PYEOF
-          fi
+          $AWS s3 cp "$EXE" "s3://$BUCKET/$PREFIX/$(basename "$EXE")" --content-type application/octet-stream
+          $AWS s3 cp "$SIG" "s3://$BUCKET/$PREFIX/$(basename "$SIG")" --content-type text/plain
 
-          aws --endpoint-url $S3_ENDPOINT s3 cp fragment.json \
-            "s3://$BUCKET/_fragments/${{ matrix.fragment }}.json" \
-            --content-type application/json
+          EXE_URL="https://storage.yandexcloud.net/$BUCKET/$PREFIX/$(basename "$EXE")"
+          python3 .github/scripts/make_fragment.py \
+            --out fragment.json --url "$EXE_URL" --sig-file "$SIG" \
+            --key windows-x86_64
+
+          $AWS s3 cp fragment.json "s3://$BUCKET/_fragments/windows.json" --content-type application/json
+
+      - name: Публикация установщика в Yandex Object Storage (macOS)
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREFIX="v${VERSION}"
+          AWS="aws --endpoint-url $S3_ENDPOINT"
+
+          DMG=$(find src-tauri/target -path '*/bundle/dmg/*.dmg' | head -1)
+          APPTAR=$(find src-tauri/target -path '*/bundle/macos/*.app.tar.gz' ! -name '*.sig' | head -1)
+          SIG="$APPTAR.sig"
+
+          $AWS s3 cp "$DMG" "s3://$BUCKET/$PREFIX/$(basename "$DMG")" --content-type application/octet-stream
+          $AWS s3 cp "$APPTAR" "s3://$BUCKET/$PREFIX/$(basename "$APPTAR")" --content-type application/gzip
+          $AWS s3 cp "$SIG" "s3://$BUCKET/$PREFIX/$(basename "$SIG")" --content-type text/plain
+
+          APPTAR_URL="https://storage.yandexcloud.net/$BUCKET/$PREFIX/$(basename "$APPTAR")"
+          python3 .github/scripts/make_fragment.py \
+            --out fragment.json --url "$APPTAR_URL" --sig-file "$SIG" \
+            --key darwin-x86_64 --key darwin-aarch64
+
+          $AWS s3 cp fragment.json "s3://$BUCKET/_fragments/macos.json" --content-type application/json
 
   publish-manifest:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.YC_RELEASER_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.YC_RELEASER_SECRET }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Собрать latest.json из фрагментов и опубликовать
         shell: bash
         run: |
@@ -126,22 +122,8 @@ PYEOF
           $AWS s3 cp "s3://$BUCKET/_fragments/windows.json" windows.json
           $AWS s3 cp "s3://$BUCKET/_fragments/macos.json" macos.json
 
-          python3 - "$VERSION" <<'PYEOF'
-import json, sys, datetime
-version = sys.argv[1]
-platforms = {}
-for name in ("windows.json", "macos.json"):
-    with open(name, encoding="utf-8") as f:
-        platforms.update(json.load(f))
-manifest = {
-    "version": version,
-    "notes": f"Дашборд ГСН МО {version}",
-    "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "platforms": platforms,
-}
-with open("latest.json", "w", encoding="utf-8") as f:
-    json.dump(manifest, f, ensure_ascii=False, indent=2)
-PYEOF
+          python3 .github/scripts/make_manifest.py \
+            --version "$VERSION" --out latest.json windows.json macos.json
 
           $AWS s3 cp latest.json "s3://$BUCKET/latest.json" \
             --content-type application/json --cache-control no-cache
