@@ -4,6 +4,10 @@ use tauri::{
   tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
   Manager, WindowEvent,
 };
+#[cfg(desktop)]
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+#[cfg(desktop)]
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,6 +26,7 @@ pub fn run() {
       }
     }))
     .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_dialog::init())
     // Закрытие окна сворачивает в трей вместо завершения процесса —
     // выйти можно только через пункт «Выход» в меню трея.
     .on_window_event(|window, event| {
@@ -51,6 +56,13 @@ pub fn run() {
       #[cfg(desktop)]
       {
         app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
+        let update_handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+          if let Err(e) = check_for_update(update_handle).await {
+            log::warn!("update check failed: {e}");
+          }
+        });
 
         let show_i = MenuItem::with_id(app, "show", "Показать", true, None::<&str>)?;
         let quit_i = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
@@ -91,4 +103,36 @@ pub fn run() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+// Проверка обновлений при каждом запуске (desktop-only, updater мобиле не
+// нужен). Не молча — спрашиваем подтверждение диалогом, т.к. на Windows
+// установка обновления сама закрывает приложение (ограничение инсталлятора).
+#[cfg(desktop)]
+async fn check_for_update(app: tauri::AppHandle) -> tauri_plugin_updater::Result<()> {
+  let Some(update) = app.updater()?.check().await? else {
+    return Ok(());
+  };
+
+  let notes = update.body.clone().unwrap_or_default();
+  let message = format!(
+    "Доступна новая версия {}.\n\n{}\n\nОбновить и перезапустить сейчас?",
+    update.version, notes
+  );
+  let confirmed = app
+    .dialog()
+    .message(message)
+    .title("Обновление дашборда ГСН МО")
+    .buttons(MessageDialogButtons::OkCancelCustom(
+      "Обновить".into(),
+      "Позже".into(),
+    ))
+    .blocking_show();
+
+  if !confirmed {
+    return Ok(());
+  }
+
+  update.download_and_install(|_chunk, _total| {}, || {}).await?;
+  app.restart();
 }
