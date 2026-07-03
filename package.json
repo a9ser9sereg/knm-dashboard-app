@@ -1,6 +1,6 @@
 {
   "name": "knm-dashboard-app",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Десктоп-обёртка (Tauri) дашборда ГСН МО — окно поверх удалённого URL, трей, офлайн-кэш, автообновление",
   "private": true,
   "scripts": {
