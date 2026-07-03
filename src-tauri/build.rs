@@ -11,5 +11,15 @@ fn main() {
     println!("cargo:rustc-link-arg-bin=app=/SUBSYSTEM:WINDOWS");
     println!("cargo:rustc-link-arg-bin=app=/ENTRY:mainCRTStartup");
   }
-  tauri_build::build()
+  // Без явного списка команд tauri-build не генерирует для них ACL-разрешение —
+  // страница на remote-origin (наш случай, окно грузит настоящий HTTPS URL, не
+  // локальный bundle) не может вызвать invoke() для команд приложения вообще,
+  // никакая запись в capabilities/remote.json их не разблокирует (проверено
+  // эмпирически: любой идентификатор для них Tauri считает "not found").
+  tauri_build::try_build(
+    tauri_build::Attributes::new().app_manifest(
+      tauri_build::AppManifest::new().commands(&["get_app_version", "trigger_update_check"]),
+    ),
+  )
+  .expect("failed to run tauri-build");
 }

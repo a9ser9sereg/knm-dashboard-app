@@ -114,6 +114,10 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.YC_RELEASER_SECRET }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # fetch-depth:0 — нужна полная история тегов для make_changelog.py
+          # (по умолчанию checkout тянет только сам тег, без остальных).
+          fetch-depth: 0
 
       - name: Собрать latest.json из фрагментов и опубликовать
         shell: bash
@@ -132,3 +136,14 @@ jobs:
             --content-type application/json --cache-control no-cache
           $AWS s3 rm "s3://$BUCKET/_fragments/windows.json"
           $AWS s3 rm "s3://$BUCKET/_fragments/macos.json"
+
+      - name: Собрать и опубликовать историю версий (changelog.json)
+        shell: bash
+        run: |
+          set -euo pipefail
+          AWS="aws --endpoint-url $S3_ENDPOINT"
+
+          python3 .github/scripts/make_changelog.py --out changelog.json
+
+          $AWS s3 cp changelog.json "s3://$BUCKET/changelog.json" \
+            --content-type application/json --cache-control no-cache
