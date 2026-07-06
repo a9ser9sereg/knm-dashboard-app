@@ -11,6 +11,10 @@ pub fn run() {
     // Должен регистрироваться первым: повторный запуск (двойной клик по
     // ярлыку, когда приложение уже свёрнуто в трей) просто поднимает окно.
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+      // macOS: приложение пряталось целиком (app.hide) при закрытии окна —
+      // разпрятать перед показом окна, иначе окно останется невидимым.
+      #[cfg(target_os = "macos")]
+      let _ = app.show();
       if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
@@ -22,6 +26,14 @@ pub fn run() {
     // выйти можно только через пункт «Выход» в меню трея.
     .on_window_event(|window, event| {
       if let WindowEvent::CloseRequested { api, .. } = event {
+        // На macOS вызов window.hide() прямо внутри обработчика CloseRequested
+        // вешает главный поток (дедлок в цикле закрытия NSWindow) — окно не
+        // сворачивается, приложение зависает, приходится завершать через док.
+        // Поэтому на macOS прячем всё приложение (аналог Cmd+H) — окно остаётся
+        // живым, восстанавливается из трея. На Windows/Linux — обычный hide окна.
+        #[cfg(target_os = "macos")]
+        let _ = window.app_handle().hide();
+        #[cfg(not(target_os = "macos"))]
         let _ = window.hide();
         api.prevent_close();
       }
@@ -62,6 +74,8 @@ pub fn run() {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
           "show" => {
+            #[cfg(target_os = "macos")]
+            let _ = app.show();
             if let Some(w) = app.get_webview_window("main") {
               let _ = w.show();
               let _ = w.set_focus();
@@ -78,6 +92,8 @@ pub fn run() {
           } = event
           {
             let app = tray.app_handle();
+            #[cfg(target_os = "macos")]
+            let _ = app.show();
             if let Some(w) = app.get_webview_window("main") {
               let _ = w.show();
               let _ = w.set_focus();
