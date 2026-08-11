@@ -9,9 +9,10 @@ name: Проверки
 
 on:
   push:
-    # ⚠️ Пустой `branches-ignore: []` рядом с `tags-ignore` глушил триггер
-    # целиком: push в master не запускал ничего. Оставляем только tags-ignore —
-    # на тегах работает release.yml, дублировать незачем.
+    # ⚠️ Проверено 11.08.2026: с фильтром вида `branches-ignore: []` +
+    # `tags-ignore` push не запускал ничего вообще (ни одного run на три
+    # пуша подряд). Явный список веток работает; теги сюда не попадают —
+    # на них работает release.yml.
     branches: ['**']
   pull_request:
   workflow_dispatch:
