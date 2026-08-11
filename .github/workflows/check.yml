@@ -12,7 +12,7 @@ on:
     # ⚠️ Пустой `branches-ignore: []` рядом с `tags-ignore` глушил триггер
     # целиком: push в master не запускал ничего. Оставляем только tags-ignore —
     # на тегах работает release.yml, дублировать незачем.
-    tags-ignore: ['**']
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 
