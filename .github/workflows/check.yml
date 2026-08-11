@@ -1,0 +1,60 @@
+name: Проверки
+
+# До сих пор единственным workflow был релизный, с триггером по тегу. Значит
+# поломка обнаруживалась в момент, когда версия уже объявлена: тег приходилось
+# удалять, версию — сжигать. Здесь проверки идут на каждое изменение, до тега.
+#
+# Репозиторий публичный, минуты Actions на нём не тарифицируются, поэтому
+# гонять их на каждый push можно свободно.
+
+on:
+  push:
+    branches-ignore: []
+    tags-ignore: ['**']   # на тегах работает release.yml, дублировать незачем
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  versions:
+    name: Версии не разошлись
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/check_version.py
+
+  rust:
+    name: Сборка проходит
+    # macOS, а не Linux: приложение собирается только под Windows и macOS, а на
+    # Linux ему пришлось бы доставлять webkit2gtk и прочую системную обвязку
+    # ради платформы, которая всё равно не выпускается.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Кэш cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Компиляция
+        working-directory: src-tauri
+        run: cargo check --locked
+
+      - name: Clippy
+        working-directory: src-tauri
+        # Без -D warnings: замечания видно в логе, но красным они пока не
+        # горят. Ужесточить, когда текущие предупреждения будут разобраны.
+        run: cargo clippy --locked

@@ -19,7 +19,18 @@ env:
   BUCKET: knm-dashboard-app
 
 jobs:
+  # Ворота перед сборкой: версия в package.json, в tauri.conf.json и в теге
+  # должны совпадать. Раньше их разъезд ничем себя не выдавал — установщик
+  # уезжал в бакет с одной версией, манифест автообновления с другой.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сверка версий с тегом
+        run: python3 .github/scripts/check_version.py --tag "$GITHUB_REF_NAME"
+
   build:
+    needs: guard
     strategy:
       fail-fast: false
       matrix:

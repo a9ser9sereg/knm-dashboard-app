@@ -19,12 +19,17 @@ Tauri-обёртка (Win/macOS) вокруг дашборда https://d5do79fn0
 ## Релиз новой версии
 
 ```
-npm version patch   # или minor/major — поднимает версию в package.json
-# вручную продублировать версию в src-tauri/tauri.conf.json ("version")
+npm run version:set -- patch   # или minor/major/X.Y.Z — поднимает версию
+                               # сразу в package.json и tauri.conf.json
 git commit -am "vX.Y.Z"
 git tag vX.Y.Z
 git push && git push --tags
 ```
+
+Версия хранится в двух файлах, поэтому двигать её руками нельзя: разъехавшись,
+они дают установщик одной версии с манифестом автообновления другой. Совпадение
+проверяется на каждое изменение (`.github/workflows/check.yml`) и ещё раз перед
+сборкой релиза — при расхождении с тегом сборка не начнётся.
 
 Пуш тега запускает `.github/workflows/release.yml`: сборка .exe (Windows) и
 универсального .dmg (macOS) на раннерах GitHub Actions, публикация

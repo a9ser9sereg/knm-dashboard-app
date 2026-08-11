@@ -7,7 +7,9 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "signer": "tauri signer generate"
+    "signer": "tauri signer generate",
+    "version:set": "node scripts/set-version.mjs",
+    "version:check": "python3 .github/scripts/check_version.py"
   },
   "license": "UNLICENSED",
   "type": "commonjs",
