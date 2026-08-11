@@ -167,7 +167,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           AWS="aws --endpoint-url $S3_ENDPOINT"
 
-          COUNT=$(ls fragments/*.json | wc -l)
+          COUNT=$(find fragments -name '*.json' | wc -l)
           [ "$COUNT" -eq 2 ] || { echo "::error::ожидались фрагменты обеих платформ, найдено $COUNT"; exit 1; }
 
           # Текст тега уходит в диалог «Доступна новая версия» — до сих пор
