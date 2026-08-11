@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Поднимает версию сразу в package.json и src-tauri/tauri.conf.json.
+ * Поднимает версию во всех файлах, где она записана.
  *
  * Раньше это делалось в два приёма: `npm version patch`, а потом руками
  * правился tauri.conf.json. Забытая вторая правка ничем себя не выдаёт до
- * самого релиза, поэтому оба файла двигаются одной командой.
+ * самого релиза, поэтому все файлы двигаются одной командой.
  *
  *   npm run version:set -- patch      # 0.1.6 -> 0.1.7
  *   npm run version:set -- minor      # 0.1.6 -> 0.2.0
@@ -19,8 +19,40 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FILES = ['package.json', 'src-tauri/tauri.conf.json'];
 const SEMVER = /^\d+\.\d+\.\d+$/;
+
+// У каждого файла свой синтаксис, поэтому и шаблон свой. Шаблон обязан
+// находить ровно одно место — замена идёт по первому совпадению, без флага g.
+// Он же служит проверкой: не нашёлся или нашёл чужую версию — значит файлы
+// разъехались, и поднимать версию нельзя.
+const TARGETS = [
+  {
+    rel: 'package.json',
+    read: /"version"\s*:\s*"(\d+\.\d+\.\d+)"/,
+  },
+  {
+    rel: 'src-tauri/tauri.conf.json',
+    read: /"version"\s*:\s*"(\d+\.\d+\.\d+)"/,
+  },
+  {
+    // Версия из [package]. У зависимостей поле version записано внутри
+    // фигурных скобок (tauri = { version = "..." }) и под шаблон с началом
+    // строки не подходит.
+    //
+    // Для сборки эта версия не используется — главной считается та, что в
+    // tauri.conf.json. Двигаем её, чтобы `cargo` и «О программе» не
+    // показывали разное, и чтобы не заводить ещё одно место с тихим
+    // расхождением.
+    rel: 'src-tauri/Cargo.toml',
+    read: /^version = "(\d+\.\d+\.\d+)"$/m,
+  },
+  {
+    // Блок самого пакета в локе. Без него `cargo check --locked` в CI падает:
+    // Cargo.toml разъехался бы с Cargo.lock.
+    rel: 'src-tauri/Cargo.lock',
+    read: /name = "app"\r?\nversion = "(\d+\.\d+\.\d+)"/,
+  },
+];
 
 const arg = process.argv[2];
 if (!arg) {
@@ -29,19 +61,24 @@ if (!arg) {
 }
 
 /** Читает файл целиком, чтобы сохранить порядок ключей и форматирование. */
-function load(rel) {
-  const path = join(ROOT, rel);
+function load(target) {
+  const path = join(ROOT, target.rel);
   const raw = readFileSync(path, 'utf8');
-  return { path, raw, json: JSON.parse(raw) };
+  const match = raw.match(target.read);
+  if (!match) {
+    console.error(`Не нашёл версию в ${target.rel} — правь вручную.`);
+    process.exit(1);
+  }
+  return { ...target, path, raw, match, version: match[1] };
 }
 
-const files = FILES.map(load);
+const files = TARGETS.map(load);
 
-const current = files[0].json.version;
-const mismatch = files.find((f) => f.json.version !== current);
+const current = files[0].version;
+const mismatch = files.find((f) => f.version !== current);
 if (mismatch) {
   console.error(
-    `Версии уже разошлись: ${FILES[0]} = ${current}, ${mismatch.path} = ${mismatch.json.version}.\n` +
+    `Версии уже разошлись: ${files[0].rel} = ${current}, ${mismatch.rel} = ${mismatch.version}.\n` +
     'Приведи их к одной вручную, потом поднимай.'
   );
   process.exit(1);
@@ -61,20 +98,14 @@ if (SEMVER.test(arg)) {
   }
 }
 
-for (const { path, raw, json } of files) {
-  // Точечная замена значения, а не JSON.stringify всего файла: так не
-  // переедут отступы и не потеряются комментарии там, где они допустимы.
-  const updated = raw.replace(
-    new RegExp(`("version"\\s*:\\s*)"${json.version.replace(/\./g, '\\.')}"`),
-    `$1"${next}"`
-  );
-  if (updated === raw) {
-    console.error(`Не нашёл поле version в ${path} — правь вручную.`);
-    process.exit(1);
-  }
+for (const { path, raw, match } of files) {
+  // Точечная замена внутри найденного куска, а не перезапись файла целиком:
+  // так не переедут отступы и не потеряется всё, что вокруг.
+  const patched = match[0].replace(match[1], next);
+  const updated = raw.slice(0, match.index) + patched + raw.slice(match.index + match[0].length);
   writeFileSync(path, updated);
 }
 
 console.log(`${current} -> ${next}`);
-console.log(FILES.map((f) => `  обновлён ${f}`).join('\n'));
+console.log(TARGETS.map((t) => `  обновлён ${t.rel}`).join('\n'));
 console.log(`\nДальше: git commit -am "v${next}" && git tag v${next} && git push && git push --tags`);
