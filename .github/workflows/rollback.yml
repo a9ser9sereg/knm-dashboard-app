@@ -1,0 +1,82 @@
+name: Откат обновления
+
+# Приложение обновляется само, поэтому неудачный релиз разъезжается по всем
+# машинам без участия человека, и путь назад нужен готовым заранее. Откат — это
+# возврат манифеста latest.json на предыдущую версию: установщики всех версий
+# остаются в бакете под своими префиксами (v0.1.5/, v0.1.6/ …), а при публикации
+# каждого релиза туда же кладётся копия его манифеста (manifests/vX.Y.Z.json).
+# Откат просто делает одну из копий текущей — пересобирать и переподписывать
+# ничего не нужно.
+#
+# Запуск: вкладка Actions → «Откат обновления» → Run workflow → версия без v.
+#
+# ⚠️ Те, кто уже успел обновиться, назад не откатятся: приложение считает
+# обновлением только версию больше установленной. Откат закрывает дорогу
+# остальным — то есть работает тем лучше, чем раньше его запустить.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия, на которую откатываемся (без v, например 0.1.5)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Та же группа, что у релиза: откат и сборка нового релиза не должны
+# переписывать latest.json одновременно.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.YC_RELEASER_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.YC_RELEASER_SECRET }}
+  AWS_DEFAULT_REGION: ru-central1
+  S3_ENDPOINT: https://storage.yandexcloud.net
+  BUCKET: knm-dashboard-app
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Вернуть latest.json на версию ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          AWS="aws --endpoint-url $S3_ENDPOINT"
+
+          if ! $AWS s3 cp "s3://$BUCKET/manifests/v${VERSION}.json" rollback.json; then
+            echo "::error::в бакете нет manifests/v${VERSION}.json."
+            echo "Копии манифестов появились вместе с этим workflow, у релизов до него их нет."
+            echo "Список доступных для отката версий:"
+            $AWS s3 ls "s3://$BUCKET/manifests/" || true
+            exit 1
+          fi
+
+          # Проверяем, что в копии действительно та версия, которую просили:
+          # дальше этот файл станет тем, что скачивают все приложения.
+          FOUND=$(jq -r '.version' rollback.json)
+          [ "$FOUND" = "$VERSION" ] || { echo "::error::в manifests/v${VERSION}.json лежит версия $FOUND"; exit 1; }
+          PLATFORMS=$(jq -r '.platforms | length' rollback.json)
+          [ "$PLATFORMS" -ge 1 ] || { echo "::error::в manifests/v${VERSION}.json нет платформ"; exit 1; }
+
+          $AWS s3 cp rollback.json "s3://$BUCKET/latest.json" \
+            --content-type application/json --cache-control no-cache
+          echo "latest.json возвращён на $VERSION"
+
+      - name: Проверить, что откат доехал
+        env:
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+        run: |
+          VERSION="${{ inputs.version }}"
+          python3 .github/scripts/verify_release.py \
+            --version "${VERSION#v}" \
+            --manifest-url "https://storage.yandexcloud.net/$BUCKET/latest.json"
