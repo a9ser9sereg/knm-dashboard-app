@@ -41,8 +41,18 @@ if [ -d "$VAULT_TMP/claude-memory" ]; then
 else
   rm -rf "$VAULT_TMP"
   if ! git clone --quiet --depth 1 "$KNM_VAULT_REPO" "$VAULT_TMP" 2>/dev/null; then
-    say "Волт склонировать не удалось (KNM_VAULT_REPO задан, но клон не прошёл)."
-    say "Проверь адрес и доступ; память в этой сессии недоступна."
+    # Обычная причина в облаке: волт приватный, а git ходит через прокси сессии,
+    # который знает только репозитории, подключённые к ней. Адрес при этом верный.
+    # Подключить репозиторий шелл не может — это инструмент `add_repo`, поэтому
+    # хук отдаёт готовые шаги Claude, а не отчёт о неудаче.
+    slug="${KNM_VAULT_REPO#*github.com[:/]}"
+    slug="${slug%.git}"
+    say "Волт склонировать не удалось: KNM_VAULT_REPO задан ($KNM_VAULT_REPO), но клон не прошёл."
+    say "В облаке это обычно значит, что приватный репозиторий волта не подключён к сессии."
+    say "Сделай сам, не спрашивая: вызови add_repo (owner/repo — $slug, access push),"
+    say "затем один раз склонируй: git clone --depth 1 $KNM_VAULT_REPO $VAULT_TMP"
+    say "и дальше действуй как обычно — с claude-memory/MEMORY.md."
+    say "Если и после add_repo клон не прошёл — проверь адрес и доступ и скажи Алексею."
     exit 0
   fi
 fi
