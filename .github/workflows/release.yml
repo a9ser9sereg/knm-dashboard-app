@@ -82,7 +82,14 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        # v1.0.0 (29.06.2026). Из ломающих изменений мажора нас касается одно:
+        # в имени `.app.tar.gz` теперь есть версия, как у остальных бандлов.
+        # Путь ищется глобом (`find_bundle.py`), а ссылка в манифест берётся из
+        # basename найденного файла — поэтому переименование проходит насквозь.
+        # Остальное мимо: `includeRelease`/`includeDebug`, `assetNamePattern`,
+        # `includeUpdaterJson`, автоинициализация проекта и Tauri v1 здесь не
+        # используются (у нас Tauri 2.11 и единственный вход — `args`).
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         with:
           args: ${{ matrix.build-args }}
 
